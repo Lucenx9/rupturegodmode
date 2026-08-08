@@ -16,8 +16,10 @@
 #pragma clang diagnostic pop
 #endif
 
+#include <cmath>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <unordered_map>
 
@@ -32,6 +34,9 @@ using RuptureGodMode::StarRuptureEffects;
 #define MODLOADER_BUILD_TAG "dev"
 #endif
 
+constexpr float HostedRosterRefreshSeconds = 1.0f;
+constexpr float NoSafeTemperature = std::numeric_limits<float>::quiet_NaN();
+
 IPluginSelf *g_self = nullptr;
 SDK::UWorld *g_world = nullptr;
 std::unique_ptr<GodModeController> g_controller;
@@ -40,8 +45,18 @@ bool g_hooksRegistered = false;
 bool g_tickFailureLogged = false;
 bool g_remoteModeLogged = false;
 bool g_protectAllPlayersWhenHosting = true;
+float g_hostedRosterAccumulator = HostedRosterRefreshSeconds;
+SDK::ACrPlayerControllerBase *g_appliedLocalController = nullptr;
+bool g_appliedLocalHadAuthority = false;
 std::unordered_map<SDK::ACrPlayerControllerBase *, std::unique_ptr<GodModeController>>
     g_hostedPlayers;
+
+struct TemperatureLatch
+{
+    SDK::ACrCharacterPlayerBase *player;
+    float value;
+};
+std::unordered_map<SDK::ACrPlayerControllerBase *, TemperatureLatch> g_safeTemperatures;
 
 PluginInfo g_pluginInfo = {
     "RuptureGodMode",
@@ -55,7 +70,7 @@ PluginInfo g_pluginInfo = {
 const ConfigEntry ConfigEntries[] = {
     {"General", "Enabled", ConfigValueType::Boolean, "true", "Load Rupture God Mode", 0.0f, 0.0f},
     {"GodMode", "EnabledAtStart", ConfigValueType::Boolean, "true",
-     "Enable God Mode whenever a playable world starts", 0.0f, 0.0f},
+     "Initial God Mode state when the plugin loads", 0.0f, 0.0f},
     {"GodMode", "ToggleKey", ConfigValueType::Keybind, "F8",
      "Enable or disable God Mode while playing", 0.0f, 0.0f},
     {"Multiplayer", "ProtectAllPlayersWhenHosting", ConfigValueType::Boolean, "true",
@@ -111,28 +126,24 @@ NetworkMode CurrentNetworkMode()
     }
 }
 
-bool FindLocalPlayer(SDK::ACrPlayerControllerBase *&controller,
-                     SDK::ACrCharacterPlayerBase *&player)
+bool HasAuthority(const NetworkMode mode)
 {
-    controller = nullptr;
-    player = nullptr;
+    return mode == NetworkMode::Standalone || mode == NetworkMode::ListenServer;
+}
+
+SDK::ACrPlayerControllerBase *FindLocalController()
+{
     if (g_world == nullptr)
     {
-        return false;
+        return nullptr;
     }
-
     SDK::APlayerController *baseController = SDK::UGameplayStatics::GetPlayerController(g_world, 0);
-    SDK::APawn *basePawn = SDK::UGameplayStatics::GetPlayerPawn(g_world, 0);
     if (baseController == nullptr ||
-        !baseController->IsA(SDK::ACrPlayerControllerBase::StaticClass()) || basePawn == nullptr ||
-        !basePawn->IsA(SDK::ACrCharacterPlayerBase::StaticClass()))
+        !baseController->IsA(SDK::ACrPlayerControllerBase::StaticClass()))
     {
-        return false;
+        return nullptr;
     }
-
-    controller = static_cast<SDK::ACrPlayerControllerBase *>(baseController);
-    player = static_cast<SDK::ACrCharacterPlayerBase *>(basePawn);
-    return true;
+    return static_cast<SDK::ACrPlayerControllerBase *>(baseController);
 }
 
 SDK::ACrCharacterPlayerBase *FindPlayerForController(SDK::ACrPlayerControllerBase *controller)
@@ -149,44 +160,112 @@ SDK::ACrCharacterPlayerBase *FindPlayerForController(SDK::ACrPlayerControllerBas
     return static_cast<SDK::ACrCharacterPlayerBase *>(pawn);
 }
 
+bool FindLocalPlayer(SDK::ACrPlayerControllerBase *&controller,
+                     SDK::ACrCharacterPlayerBase *&player)
+{
+    controller = FindLocalController();
+    player = FindPlayerForController(controller);
+    return controller != nullptr && player != nullptr;
+}
+
+float RememberSafeTemperature(SDK::ACrPlayerControllerBase *controller,
+                              SDK::ACrCharacterPlayerBase *player)
+{
+    if (controller == nullptr || player == nullptr || player->TemperatureAttributes == nullptr)
+    {
+        return NoSafeTemperature;
+    }
+    const float current = player->TemperatureAttributes->CurrentTemperature.CurrentValue;
+    if (!std::isfinite(current))
+    {
+        return NoSafeTemperature;
+    }
+    const auto found = g_safeTemperatures.find(controller);
+    if (found == g_safeTemperatures.end() || found->second.player != player)
+    {
+        g_safeTemperatures.insert_or_assign(controller, TemperatureLatch{player, current});
+        return current;
+    }
+    return found->second.value;
+}
+
+void TrackHostedController(SDK::ACrPlayerControllerBase *controller)
+{
+    if (controller == nullptr || g_controller == nullptr)
+    {
+        return;
+    }
+    g_hostedPlayers.try_emplace(controller,
+                                std::make_unique<GodModeController>(g_controller->IsEnabled()));
+}
+
+void RefreshHostedPlayers()
+{
+    if (g_world == nullptr)
+    {
+        return;
+    }
+    SDK::TArray<SDK::AActor *> actors;
+    SDK::UGameplayStatics::GetAllActorsOfClass(g_world, SDK::ACrCharacterPlayerBase::StaticClass(),
+                                               &actors);
+    for (SDK::AActor *actor : actors)
+    {
+        if (actor == nullptr || !actor->IsA(SDK::ACrCharacterPlayerBase::StaticClass()))
+        {
+            continue;
+        }
+        auto *player = static_cast<SDK::ACrCharacterPlayerBase *>(actor);
+        SDK::AController *baseController = player->GetController();
+        if (baseController != nullptr &&
+            baseController->IsA(SDK::ACrPlayerControllerBase::StaticClass()))
+        {
+            TrackHostedController(static_cast<SDK::ACrPlayerControllerBase *>(baseController));
+        }
+    }
+}
+
 void DisableCurrentPlayerEffects()
 {
-    SDK::ACrPlayerControllerBase *controller = nullptr;
-    SDK::ACrCharacterPlayerBase *player = nullptr;
-    if (g_controller != nullptr && FindLocalPlayer(controller, player))
+    SDK::ACrPlayerControllerBase *controller = g_appliedLocalController;
+    if (controller == nullptr)
     {
-        const bool hasAuthority = CurrentNetworkMode() != NetworkMode::RemoteClient;
-        StarRuptureEffects effects(controller, player, hasAuthority);
+        controller = FindLocalController();
+    }
+    if (g_controller != nullptr && controller != nullptr)
+    {
+        StarRuptureEffects effects(controller, FindPlayerForController(controller),
+                                   g_appliedLocalHadAuthority, NoSafeTemperature);
         g_controller->RemoveAppliedEffects(effects);
     }
     if (g_controller != nullptr)
     {
         g_controller->ForgetTarget();
     }
+    g_appliedLocalController = nullptr;
+    g_appliedLocalHadAuthority = false;
 }
 
 void DisableHostedPlayerEffects()
 {
     for (auto &[controller, state] : g_hostedPlayers)
     {
-        StarRuptureEffects effects(controller, FindPlayerForController(controller), true);
+        StarRuptureEffects effects(controller, FindPlayerForController(controller), true,
+                                   NoSafeTemperature);
         state->RemoveAppliedEffects(effects);
     }
 }
 
 void OnPlayerJoined(void *rawController)
 {
-    if (rawController == nullptr || g_controller == nullptr)
+    if (rawController == nullptr)
     {
         return;
     }
     auto *controller = static_cast<SDK::ACrPlayerControllerBase *>(rawController);
-    if (!controller->IsA(SDK::ACrPlayerControllerBase::StaticClass()))
+    if (controller->IsA(SDK::ACrPlayerControllerBase::StaticClass()))
     {
-        return;
+        TrackHostedController(controller);
     }
-    g_hostedPlayers.try_emplace(controller,
-                                std::make_unique<GodModeController>(g_controller->IsEnabled()));
 }
 
 void OnPlayerLeft(void *rawController)
@@ -197,8 +276,10 @@ void OnPlayerLeft(void *rawController)
     {
         return;
     }
-    StarRuptureEffects effects(controller, FindPlayerForController(controller), true);
+    SDK::ACrCharacterPlayerBase *player = FindPlayerForController(controller);
+    StarRuptureEffects effects(controller, player, true, NoSafeTemperature);
     found->second->RemoveAppliedEffects(effects);
+    g_safeTemperatures.erase(controller);
     g_hostedPlayers.erase(found);
 }
 
@@ -206,6 +287,7 @@ void OnWorldBeginPlay(SDK::UWorld *world)
 {
     g_world = world;
     g_remoteModeLogged = false;
+    g_hostedRosterAccumulator = HostedRosterRefreshSeconds;
     if (g_controller != nullptr)
     {
         g_controller->ForgetTarget();
@@ -221,10 +303,11 @@ void OnWorldEndPlay(SDK::UWorld *world, const char *)
     DisableCurrentPlayerEffects();
     DisableHostedPlayerEffects();
     g_hostedPlayers.clear();
+    g_safeTemperatures.clear();
     g_world = nullptr;
 }
 
-void OnEngineTick(float)
+void OnEngineTick(const float deltaSeconds)
 {
     if (g_world == nullptr || g_controller == nullptr)
     {
@@ -238,9 +321,8 @@ void OnEngineTick(float)
         {
             if (!g_remoteModeLogged)
             {
-                LogWarning("Multiplayer client protection is active locally; install "
-                           "the plugin on "
-                           "the host too for server-authoritative protection");
+                LogWarning("Multiplayer client protection is active locally; install the plugin "
+                           "on the host too for server-authoritative protection");
                 g_remoteModeLogged = true;
             }
         }
@@ -252,20 +334,39 @@ void OnEngineTick(float)
         SDK::ACrPlayerControllerBase *controller = nullptr;
         SDK::ACrCharacterPlayerBase *player = nullptr;
         const bool hasPlayer = FindLocalPlayer(controller, player);
-        StarRuptureEffects effects(controller, player, mode != NetworkMode::RemoteClient);
+        const float safeTemperature = RememberSafeTemperature(controller, player);
+        StarRuptureEffects effects(controller, player, HasAuthority(mode), safeTemperature);
         const ApplyResult result = g_controller->Reconcile(
             mode, hasPlayer ? reinterpret_cast<std::uintptr_t>(player) : 0, effects);
         if (result == ApplyResult::Applied)
         {
+            g_appliedLocalController = controller;
+            g_appliedLocalHadAuthority = HasAuthority(mode);
             LogInfo("God Mode enabled");
         }
         else if (result == ApplyResult::Removed)
         {
+            g_appliedLocalController = nullptr;
+            g_appliedLocalHadAuthority = false;
             LogInfo("God Mode disabled");
         }
 
         if (mode == NetworkMode::ListenServer && g_protectAllPlayersWhenHosting)
         {
+            if (deltaSeconds > 0.0f && deltaSeconds <= 5.0f)
+            {
+                g_hostedRosterAccumulator += deltaSeconds;
+            }
+            else
+            {
+                g_hostedRosterAccumulator = HostedRosterRefreshSeconds;
+            }
+            if (g_hostedRosterAccumulator >= HostedRosterRefreshSeconds)
+            {
+                g_hostedRosterAccumulator = 0.0f;
+                RefreshHostedPlayers();
+            }
+
             for (auto &[hostedController, state] : g_hostedPlayers)
             {
                 if (hostedController == controller)
@@ -275,7 +376,10 @@ void OnEngineTick(float)
                 SDK::ACrCharacterPlayerBase *hostedPlayer =
                     FindPlayerForController(hostedController);
                 state->SetEnabled(g_controller->IsEnabled());
-                StarRuptureEffects hostedEffects(hostedController, hostedPlayer, true);
+                const float hostedSafeTemperature =
+                    RememberSafeTemperature(hostedController, hostedPlayer);
+                StarRuptureEffects hostedEffects(hostedController, hostedPlayer, true,
+                                                 hostedSafeTemperature);
                 state->Reconcile(NetworkMode::ListenServer,
                                  reinterpret_cast<std::uintptr_t>(hostedPlayer), hostedEffects);
             }
@@ -350,6 +454,12 @@ extern "C"
                 self->hooks->Players->RegisterOnPlayerJoined(&OnPlayerJoined);
                 self->hooks->Players->RegisterOnPlayerLeft(&OnPlayerLeft);
             }
+            else if (g_protectAllPlayersWhenHosting)
+            {
+                g_protectAllPlayersWhenHosting = false;
+                LogWarning("Player lifecycle hooks are unavailable; host protection is limited "
+                           "to the local player");
+            }
             g_hooksRegistered = true;
             LogInfo("Plugin initialized; press the configured key to toggle God Mode");
             return true;
@@ -396,6 +506,9 @@ extern "C"
         g_hooksRegistered = false;
         g_controller.reset();
         g_hostedPlayers.clear();
+        g_safeTemperatures.clear();
+        g_appliedLocalController = nullptr;
+        g_appliedLocalHadAuthority = false;
         g_world = nullptr;
         g_self = nullptr;
     }

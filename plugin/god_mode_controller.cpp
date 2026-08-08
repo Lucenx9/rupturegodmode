@@ -26,7 +26,6 @@ ApplyResult GodModeController::Reconcile(const NetworkMode mode, const std::uint
 {
     if (mode == NetworkMode::Unknown)
     {
-        ForgetTarget();
         return ApplyResult::Unsupported;
     }
     if (targetId == 0)
@@ -51,6 +50,7 @@ ApplyResult GodModeController::Reconcile(const NetworkMode mode, const std::uint
     {
         if (!effects.SetEnabled(true))
         {
+            effects.Maintain();
             return ApplyResult::Waiting;
         }
         m_applied = true;

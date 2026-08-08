@@ -6,10 +6,11 @@ Provide a StarRupture ModLoader client plugin that keeps the local player's surv
 
 ## Required behavior
 
-- God Mode is enabled by default when a playable world starts.
+- God Mode starts enabled when the plugin loads. A manual toggle persists across world travel until the game process exits.
 - The player can toggle it without opening a custom menu; the default key is `F8` and is configurable through ModLoader.
 - Health, energy, shield, oxygen, hydration, calories, med-tool charge, and grenade charge are maintained at their maximum values.
 - Toxicity, radiation, heat, drain, corrosion, and infection are maintained at their minimum values.
+- Temperature is frozen at the safe value captured for the current pawn.
 - The game's native unlimited/restricted cheats are enabled for health, survival vitals, ammunition, weapon heat, and hostile environmental values.
 - Disabling the mode removes all native cheats installed by this plugin and stops maintaining attributes.
 - A new pawn after respawn receives God Mode automatically.

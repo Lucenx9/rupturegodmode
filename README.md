@@ -1,10 +1,10 @@
 # Rupture God Mode
 
-StarRupture ModLoader plugin that protects the local player's survival state. It starts enabled by default and can be toggled with `F8`, without adding another in-game window.
+StarRupture ModLoader plugin that protects the local player's survival state. It starts enabled by default and can be toggled with `F8`, without adding another in-game window. The toggle state persists across world travel for the current game session.
 
 ## Protected values
 
-While enabled, the plugin keeps health, energy, shield, oxygen, hydration, calories, med-tool charge, and grenade charge full. Toxicity, radiation, heat, drain, corrosion, and infection are held at their minimum. Native StarRupture cheats also provide unlimited ammo and prevent weapon heat.
+While enabled, the plugin keeps health, energy, shield, oxygen, hydration, calories, med-tool charge, and grenade charge full. Toxicity, radiation, heat, drain, corrosion, and infection are held at their minimum, while temperature is frozen at the safe value captured for the pawn. Native StarRupture cheats also provide unlimited ammo and prevent weapon heat.
 
 Multiplayer is supported too. A listen-server host protects every connected player by default. A remote client maintains its local predicted attributes; for reliable server-authoritative health and survival protection, the host should also run the plugin.
 

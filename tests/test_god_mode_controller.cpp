@@ -69,7 +69,7 @@ void FailedApplicationIsRetried()
     Require(failed == ApplyResult::Waiting, "failed application remains waiting");
     Require(retried == ApplyResult::Applied, "a later tick retries application");
     Require(effects.setEnabledCalls == 2, "failed application is not cached as active");
-    Require(effects.maintainCalls == 1, "vitals are maintained only after activation succeeds");
+    Require(effects.maintainCalls == 2, "vitals are maintained while native activation is retried");
 }
 
 void ToggleOffRemovesGodModeOnce()
@@ -113,6 +113,20 @@ void UnknownNetworkModeIsNeverMutated()
     Require(result == ApplyResult::Unsupported, "unknown network state is unsupported");
     Require(effects.setEnabledCalls == 0, "unknown network state changes no effects");
     Require(effects.maintainCalls == 0, "unknown network state changes no vitals");
+}
+
+void UnknownTransitionPreservesOwnershipForCleanup()
+{
+    GodModeController controller(true);
+    FakeEffects effects;
+
+    controller.Reconcile(NetworkMode::Standalone, 406, effects);
+    controller.Reconcile(NetworkMode::Unknown, 406, effects);
+    const ApplyResult removed = controller.RemoveAppliedEffects(effects);
+
+    Require(removed == ApplyResult::Removed,
+            "an unknown travel state does not lose ownership of native effects");
+    Require(effects.setEnabledCalls == 2, "cleanup still disables effects after travel");
 }
 
 void RespawnReappliesGodModeToTheNewPawn()
@@ -187,6 +201,7 @@ int main()
     ToggleOffRemovesGodModeOnce();
     RemoteClientMaintainsItsLocalPrediction();
     UnknownNetworkModeIsNeverMutated();
+    UnknownTransitionPreservesOwnershipForCleanup();
     RespawnReappliesGodModeToTheNewPawn();
     ListenServerHostIsSupported();
     FailedRemovalIsRetried();

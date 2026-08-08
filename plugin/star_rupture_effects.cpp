@@ -11,6 +11,7 @@
 #endif
 
 #include <cmath>
+#include <utility>
 
 namespace RuptureGodMode
 {
@@ -29,12 +30,24 @@ float UsableLimit(const SDK::FGameplayAttributeData &limit, const float fallback
     return fallback;
 }
 
-void SetToLimit(SDK::FGameplayAttributeData &current,
-                const SDK::FGameplayAttributeData &limit) noexcept
+template <typename Notify>
+void SetToValue(SDK::FGameplayAttributeData &current, const float value, Notify &&notify)
 {
-    const float value = UsableLimit(limit, current.CurrentValue);
+    if (!std::isfinite(value) || (current.BaseValue == value && current.CurrentValue == value))
+    {
+        return;
+    }
+    const SDK::FGameplayAttributeData old = current;
     current.BaseValue = value;
     current.CurrentValue = value;
+    notify(old);
+}
+
+template <typename Notify>
+void SetToLimit(SDK::FGameplayAttributeData &current, const SDK::FGameplayAttributeData &limit,
+                Notify &&notify)
+{
+    SetToValue(current, UsableLimit(limit, current.CurrentValue), std::forward<Notify>(notify));
 }
 
 SDK::UCrCheatManager *GetCheatManager(SDK::ACrPlayerControllerBase *controller,
@@ -78,8 +91,10 @@ void ApplyNativeCheats(SDK::UCrCheatManager &cheats, const bool enabled)
 
 StarRuptureEffects::StarRuptureEffects(SDK::ACrPlayerControllerBase *controller,
                                        SDK::ACrCharacterPlayerBase *player,
-                                       const bool allowNativeCheats) noexcept
-    : m_controller(controller), m_player(player), m_allowNativeCheats(allowNativeCheats)
+                                       const bool allowNativeCheats,
+                                       const float safeTemperature) noexcept
+    : m_controller(controller), m_player(player), m_allowNativeCheats(allowNativeCheats),
+      m_safeTemperature(safeTemperature)
 {
 }
 
@@ -107,72 +122,124 @@ void StarRuptureEffects::Maintain()
 
     if (m_player->HealthAttributes != nullptr)
     {
-        SetToLimit(m_player->HealthAttributes->CurrentHealth,
-                   m_player->HealthAttributes->MaxHealth);
+        auto *attributes = m_player->HealthAttributes;
+        SetToLimit(attributes->CurrentHealth, attributes->MaxHealth,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentHealth(old);
+                   });
     }
     if (m_player->EnergyAttributes != nullptr)
     {
-        SetToLimit(m_player->EnergyAttributes->CurrentEnergy,
-                   m_player->EnergyAttributes->MaxEnergy);
+        auto *attributes = m_player->EnergyAttributes;
+        SetToLimit(attributes->CurrentEnergy, attributes->MaxEnergy,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentEnergy(old);
+                   });
     }
     if (m_player->ShieldAttributes != nullptr)
     {
-        SetToLimit(m_player->ShieldAttributes->CurrentShield,
-                   m_player->ShieldAttributes->MaxShield);
+        auto *attributes = m_player->ShieldAttributes;
+        SetToLimit(attributes->CurrentShield, attributes->MaxShield,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentShield(old);
+                   });
     }
     if (m_player->OxygenAttributes != nullptr)
     {
-        SetToLimit(m_player->OxygenAttributes->CurrentOxygen,
-                   m_player->OxygenAttributes->MaxOxygen);
+        auto *attributes = m_player->OxygenAttributes;
+        SetToLimit(attributes->CurrentOxygen, attributes->MaxOxygen,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentOxygen(old);
+                   });
     }
     if (m_player->HydrationAttributes != nullptr)
     {
-        SetToLimit(m_player->HydrationAttributes->CurrentHydration,
-                   m_player->HydrationAttributes->MaxHydration);
+        auto *attributes = m_player->HydrationAttributes;
+        SetToLimit(attributes->CurrentHydration, attributes->MaxHydration,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentHydration(old);
+                   });
     }
     if (m_player->CaloriesAttributes != nullptr)
     {
-        SetToLimit(m_player->CaloriesAttributes->CurrentCalories,
-                   m_player->CaloriesAttributes->MaxCalories);
+        auto *attributes = m_player->CaloriesAttributes;
+        SetToLimit(attributes->CurrentCalories, attributes->MaxCalories,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentCalories(old);
+                   });
     }
     if (m_player->MedToolChargeAttributes != nullptr)
     {
-        SetToLimit(m_player->MedToolChargeAttributes->CurrentMedToolCharge,
-                   m_player->MedToolChargeAttributes->MaxMedToolCharge);
+        auto *attributes = m_player->MedToolChargeAttributes;
+        SetToLimit(attributes->CurrentMedToolCharge, attributes->MaxMedToolCharge,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentMedToolCharge(old);
+                   });
     }
     if (m_player->GrenadeChargeAttributes != nullptr)
     {
-        SetToLimit(m_player->GrenadeChargeAttributes->CurrentGrenadeCharge,
-                   m_player->GrenadeChargeAttributes->MaxGrenadeCharge);
+        auto *attributes = m_player->GrenadeChargeAttributes;
+        SetToLimit(attributes->CurrentGrenadeCharge, attributes->MaxGrenadeCharge,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentGrenadeCharge(old);
+                   });
     }
 
     if (m_player->ToxicityAttributes != nullptr)
     {
-        SetToLimit(m_player->ToxicityAttributes->CurrentToxicity,
-                   m_player->ToxicityAttributes->MinToxicity);
+        auto *attributes = m_player->ToxicityAttributes;
+        SetToLimit(attributes->CurrentToxicity, attributes->MinToxicity,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentToxicity(old);
+                   });
     }
     if (m_player->RadiationAttributes != nullptr)
     {
-        SetToLimit(m_player->RadiationAttributes->CurrentRadiation,
-                   m_player->RadiationAttributes->MinRadiation);
+        auto *attributes = m_player->RadiationAttributes;
+        SetToLimit(attributes->CurrentRadiation, attributes->MinRadiation,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentRadiation(old);
+                   });
     }
     if (m_player->HeatAttributes != nullptr)
     {
-        SetToLimit(m_player->HeatAttributes->CurrentHeat, m_player->HeatAttributes->MinHeat);
+        auto *attributes = m_player->HeatAttributes;
+        SetToLimit(attributes->CurrentHeat, attributes->MinHeat,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentHeat(old);
+                   });
     }
     if (m_player->DrainAttributes != nullptr)
     {
-        SetToLimit(m_player->DrainAttributes->CurrentDrain, m_player->DrainAttributes->MinDrain);
+        auto *attributes = m_player->DrainAttributes;
+        SetToLimit(attributes->CurrentDrain, attributes->MinDrain,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentDrain(old);
+                   });
     }
     if (m_player->CorrosionAttributes != nullptr)
     {
-        SetToLimit(m_player->CorrosionAttributes->CurrentCorrosion,
-                   m_player->CorrosionAttributes->MinCorrosion);
+        auto *attributes = m_player->CorrosionAttributes;
+        SetToLimit(attributes->CurrentCorrosion, attributes->MinCorrosion,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentCorrosion(old);
+                   });
     }
     if (m_player->InfectionAttributes != nullptr)
     {
-        SetToLimit(m_player->InfectionAttributes->CurrentInfection,
-                   m_player->InfectionAttributes->MinInfection);
+        auto *attributes = m_player->InfectionAttributes;
+        SetToLimit(attributes->CurrentInfection, attributes->MinInfection,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentInfection(old);
+                   });
+    }
+    if (m_player->TemperatureAttributes != nullptr)
+    {
+        auto *attributes = m_player->TemperatureAttributes;
+        SetToValue(attributes->CurrentTemperature, m_safeTemperature,
+                   [attributes](const SDK::FGameplayAttributeData &old) {
+                       attributes->OnRep_CurrentTemperature(old);
+                   });
     }
 }
 } // namespace RuptureGodMode
