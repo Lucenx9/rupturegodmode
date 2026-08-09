@@ -14,3 +14,4 @@ cxx_compiler=${CXX_COMPILER:-clang++}
     -o "$test_binary"
 "$test_binary"
 python3 -m unittest "$project_root/tests/test_release_packaging.py" -v
+"$project_root/tests/test_linux_installer.sh"

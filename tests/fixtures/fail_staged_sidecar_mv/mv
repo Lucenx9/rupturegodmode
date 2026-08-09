@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${1:-} == -- && \
+    ${2:-} == */.RuptureGodMode.install.*/RuptureGodMode.json && \
+    ${2:-} != */rollback/* ]]; then
+    exit 75
+fi
+
+exec "${RGM_TEST_REAL_MV:?}" "$@"

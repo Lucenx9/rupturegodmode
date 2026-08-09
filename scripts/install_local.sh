@@ -32,27 +32,210 @@ if [[ "$(od -An -N2 -tc "$source_dll" | tr -d ' ')" != "MZ" ]]; then
     exit 1
 fi
 
-install -m 0644 "$source_dll" "$plugin_dir/RuptureGodMode.dll"
-install -m 0644 "$source_sidecar" "$plugin_dir/RuptureGodMode.json"
-rm -f -- "$plugin_dir/RuptureGodMode-Client.dll" "$plugin_dir/RuptureGodMode-Client.json"
+destination_dll="$plugin_dir/RuptureGodMode.dll"
+destination_sidecar="$plugin_dir/RuptureGodMode.json"
+legacy_dll="$plugin_dir/RuptureGodMode-Client.dll"
+legacy_sidecar="$plugin_dir/RuptureGodMode-Client.json"
 
-if [[ -f "$config_file" ]]; then
-    config_update="$config_file.rgm-update.$$"
-    trap 'rm -f -- "$config_update"' EXIT
+path_exists() {
+    [[ -e "$1" || -L "$1" ]]
+}
+
+for existing_path in \
+    "$destination_dll" \
+    "$destination_sidecar" \
+    "$legacy_dll" \
+    "$legacy_sidecar" \
+    "$config_file"; do
+    if path_exists "$existing_path" && [[ ! -f "$existing_path" ]]; then
+        echo "Expected a regular file but found another filesystem entry: $existing_path" >&2
+        exit 1
+    fi
+done
+
+transaction_directory=$(mktemp -d "$plugin_dir/.RuptureGodMode.install.XXXXXX")
+rollback_directory="$transaction_directory/rollback"
+staged_dll="$transaction_directory/RuptureGodMode.dll"
+staged_sidecar="$transaction_directory/RuptureGodMode.json"
+staged_config="$transaction_directory/modloader.ini"
+mkdir "$rollback_directory"
+
+had_dll=0
+had_sidecar=0
+had_config=0
+had_legacy_dll=0
+had_legacy_sidecar=0
+path_exists "$destination_dll" && had_dll=1
+path_exists "$destination_sidecar" && had_sidecar=1
+path_exists "$config_file" && had_config=1
+path_exists "$legacy_dll" && had_legacy_dll=1
+path_exists "$legacy_sidecar" && had_legacy_sidecar=1
+
+backed_up_dll=0
+backed_up_sidecar=0
+backed_up_config=0
+backed_up_legacy_dll=0
+backed_up_legacy_sidecar=0
+installed_dll=0
+installed_sidecar=0
+installed_config=0
+transaction_active=0
+
+rollback_installation() {
+    local rollback_failed=0
+
+    restore_backup() {
+        local backup_path=$1
+        local destination_path=$2
+
+        if path_exists "$backup_path"; then
+            if path_exists "$destination_path"; then
+                return 1
+            fi
+            mv -- "$backup_path" "$destination_path"
+        elif ! path_exists "$destination_path"; then
+            return 1
+        fi
+    }
+
+    if ((installed_config)) && path_exists "$config_file"; then
+        rm -f -- "$config_file" || rollback_failed=1
+    fi
+    if ((installed_sidecar)) && path_exists "$destination_sidecar"; then
+        rm -f -- "$destination_sidecar" || rollback_failed=1
+    fi
+    if ((installed_dll)) && path_exists "$destination_dll"; then
+        rm -f -- "$destination_dll" || rollback_failed=1
+    fi
+
+    if ((backed_up_config)); then
+        if ! restore_backup "$rollback_directory/modloader.ini" "$config_file"; then
+            rollback_failed=1
+        fi
+    fi
+    if ((backed_up_sidecar)); then
+        if ! restore_backup \
+            "$rollback_directory/RuptureGodMode.json" "$destination_sidecar"; then
+            rollback_failed=1
+        fi
+    fi
+    if ((backed_up_dll)); then
+        if ! restore_backup \
+            "$rollback_directory/RuptureGodMode.dll" "$destination_dll"; then
+            rollback_failed=1
+        fi
+    fi
+    if ((backed_up_legacy_sidecar)); then
+        if ! restore_backup \
+            "$rollback_directory/RuptureGodMode-Client.json" "$legacy_sidecar"; then
+            rollback_failed=1
+        fi
+    fi
+    if ((backed_up_legacy_dll)); then
+        if ! restore_backup \
+            "$rollback_directory/RuptureGodMode-Client.dll" "$legacy_dll"; then
+            rollback_failed=1
+        fi
+    fi
+
+    ((rollback_failed == 0))
+}
+
+cleanup_on_exit() {
+    local exit_status=$?
+    trap - EXIT
+
+    if ((transaction_active)); then
+        if rollback_installation; then
+            transaction_active=0
+            rm -rf -- "$transaction_directory"
+        else
+            echo "Automatic rollback was incomplete. Recovery files were preserved in:" >&2
+            echo "  $transaction_directory" >&2
+        fi
+    else
+        rm -rf -- "$transaction_directory"
+    fi
+
+    exit "$exit_status"
+}
+trap cleanup_on_exit EXIT
+
+install -m 0644 "$source_dll" "$staged_dll"
+install -m 0644 "$source_sidecar" "$staged_sidecar"
+
+if ((had_config)); then
     awk '
-        /^\[AutoUpdate\][[:space:]]*$/ { in_auto_update=1; print; next }
-        /^\[/ { in_auto_update=0 }
+        function finish_auto_update_section() {
+            if (in_auto_update && !section_has_enabled) print "Enabled=1"
+        }
+        /^\[AutoUpdate\][[:space:]]*$/ {
+            finish_auto_update_section()
+            found_auto_update=1
+            in_auto_update=1
+            section_has_enabled=0
+            print
+            next
+        }
+        /^\[/ {
+            finish_auto_update_section()
+            in_auto_update=0
+            print
+            next
+        }
         in_auto_update && /^[[:space:]]*Enabled[[:space:]]*=/ {
-            print "Enabled=1"; changed=1; next
+            print "Enabled=1"
+            section_has_enabled=1
+            next
         }
         { print }
-        END { if (!changed) exit 2 }
-    ' "$config_file" >"$config_update" || {
+        END {
+            finish_auto_update_section()
+            if (!found_auto_update) {
+                print ""
+                print "[AutoUpdate]"
+                print "Enabled=1"
+            }
+        }
+    ' "$config_file" >"$staged_config" || {
         echo "Could not enable ModLoader auto-update in $config_file" >&2
         exit 1
     }
-    mv -f -- "$config_update" "$config_file"
-    trap - EXIT
+else
+    printf '[AutoUpdate]\nEnabled=1\n' >"$staged_config"
 fi
+
+transaction_active=1
+if ((had_dll)); then
+    backed_up_dll=1
+    mv -- "$destination_dll" "$rollback_directory/RuptureGodMode.dll"
+fi
+if ((had_sidecar)); then
+    backed_up_sidecar=1
+    mv -- "$destination_sidecar" "$rollback_directory/RuptureGodMode.json"
+fi
+if ((had_config)); then
+    backed_up_config=1
+    mv -- "$config_file" "$rollback_directory/modloader.ini"
+fi
+if ((had_legacy_dll)); then
+    backed_up_legacy_dll=1
+    mv -- "$legacy_dll" "$rollback_directory/RuptureGodMode-Client.dll"
+fi
+if ((had_legacy_sidecar)); then
+    backed_up_legacy_sidecar=1
+    mv -- "$legacy_sidecar" "$rollback_directory/RuptureGodMode-Client.json"
+fi
+
+installed_dll=1
+mv -- "$staged_dll" "$destination_dll"
+installed_sidecar=1
+mv -- "$staged_sidecar" "$destination_sidecar"
+installed_config=1
+mv -- "$staged_config" "$config_file"
+
+transaction_active=0
+rm -rf -- "$transaction_directory"
+trap - EXIT
 
 echo "Installed RuptureGodMode.dll and auto-update sidecar in $plugin_dir"
