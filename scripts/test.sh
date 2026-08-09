@@ -13,3 +13,4 @@ cxx_compiler=${CXX_COMPILER:-clang++}
     "$project_root/plugin/immortality_state.cpp" \
     -o "$test_binary"
 "$test_binary"
+python3 -m unittest "$project_root/tests/test_release_packaging.py" -v

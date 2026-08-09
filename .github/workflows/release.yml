@@ -1,0 +1,156 @@
+name: Build and Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+concurrency:
+  group: rupture-god-mode-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: AlienXAXS/StarRupture-Plugin-SDK
+          ref: a3f37a6638be19d0a40fdaba117b03558b20c720
+          path: plugin-sdk
+      - uses: actions/checkout@v4
+        with:
+          repository: AlienXAXS/StarRupture-Game-SDK
+          ref: 2c7d138506e42011d1ccf4ee044339c154b45b90
+          path: game-sdk
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Validate release tag
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:GITHUB_REF_NAME -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Release tags must use vMAJOR.MINOR.PATCH"
+          }
+          $sourceMarker = "<!-- source-sha:$env:GITHUB_SHA -->"
+          $existingReleaseJson = gh release view $env:GITHUB_REF_NAME `
+            --repo $env:GITHUB_REPOSITORY `
+            --json isDraft,body 2>$null
+          $releaseLookupExit = $LASTEXITCODE
+          if ($releaseLookupExit -eq 0) {
+            $existingRelease = $existingReleaseJson | ConvertFrom-Json
+            if (-not $existingRelease.isDraft) {
+              throw "Release $env:GITHUB_REF_NAME is already published and immutable"
+            }
+            if ([string]::IsNullOrEmpty($existingRelease.body) -or
+                -not $existingRelease.body.Contains($sourceMarker)) {
+              throw "Draft release $env:GITHUB_REF_NAME belongs to a different source commit"
+            }
+          }
+          $current = [version]$env:GITHUB_REF_NAME.Substring(1)
+          $highest = $null
+          $releaseTags = gh release list `
+            --repo $env:GITHUB_REPOSITORY `
+            --limit 1000 `
+            --json tagName `
+            --jq '.[].tagName'
+          if ($LASTEXITCODE -ne 0) { throw "Could not inspect existing releases" }
+          foreach ($releaseTag in $releaseTags) {
+            if ($releaseTag -eq $env:GITHUB_REF_NAME -or
+                $releaseTag -notmatch '^v\d+\.\d+\.\d+$') {
+              continue
+            }
+            $parsed = [version]$releaseTag.Substring(1)
+            if ($null -eq $highest -or $parsed -gt $highest) { $highest = $parsed }
+          }
+          if ($null -ne $highest -and $current -le $highest) {
+            throw "Release $env:GITHUB_REF_NAME must be newer than v$highest"
+          }
+
+      - name: Run release tests
+        shell: pwsh
+        run: |
+          python -m unittest tests/test_release_packaging.py -v
+          if ($LASTEXITCODE -ne 0) { throw "Release packaging tests failed" }
+          & tests/Test-WindowsInstaller.ps1
+          cmake -S . -B build/controller-tests
+          if ($LASTEXITCODE -ne 0) { throw "Controller test configuration failed" }
+          cmake --build build/controller-tests --config Release
+          if ($LASTEXITCODE -ne 0) { throw "Controller test build failed" }
+          ctest --test-dir build/controller-tests -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "Controller tests failed" }
+
+      - name: Build versioned plugin
+        shell: pwsh
+        run: |
+          msbuild RuptureGodMode.sln `
+            /p:Configuration="Client Release" `
+            /p:Platform=x64 `
+            /p:GameSDKRoot="${{ github.workspace }}\game-sdk" `
+            /p:PluginSDKInclude="${{ github.workspace }}\plugin-sdk\include" `
+            /p:ModLoaderBuildTag="$env:GITHUB_REF_NAME" `
+            /m /v:minimal
+
+      - name: Generate auto-update and installer assets
+        shell: pwsh
+        run: |
+          python scripts/package_release.py `
+            --version "$env:GITHUB_REF_NAME" `
+            --dll "build\Client Release\Plugins\RuptureGodMode.dll" `
+            --output-dir release-assets
+
+      - name: Publish complete release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $sourceMarker = "<!-- source-sha:$env:GITHUB_SHA -->"
+          $assets = @(
+            "release-assets/RuptureGodMode.dll",
+            "release-assets/RuptureGodMode-client-manifest.json",
+            "release-assets/RuptureGodMode-Client-$tag.zip",
+            "release-assets/RuptureGodMode-Windows-$tag.zip"
+          )
+          foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
+              throw "Missing release asset: $asset"
+            }
+          }
+
+          $existingReleaseJson = gh release view $tag `
+            --repo $env:GITHUB_REPOSITORY `
+            --json isDraft,body 2>$null
+          $releaseLookupExit = $LASTEXITCODE
+          if ($releaseLookupExit -eq 0) {
+            $existingRelease = $existingReleaseJson | ConvertFrom-Json
+            if (-not $existingRelease.isDraft -or
+                [string]::IsNullOrEmpty($existingRelease.body) -or
+                -not $existingRelease.body.Contains($sourceMarker)) {
+              throw "Existing release $tag cannot be modified by this workflow"
+            }
+          } else {
+            gh release create $tag `
+              --repo $env:GITHUB_REPOSITORY `
+              --target $env:GITHUB_SHA `
+              --title "Rupture God Mode $tag" `
+              --generate-notes `
+              --notes $sourceMarker `
+              --draft
+            if ($LASTEXITCODE -ne 0) { throw "Could not create release $tag" }
+          }
+
+          gh release upload $tag @assets `
+            --repo $env:GITHUB_REPOSITORY `
+            --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Could not upload release assets" }
+          gh release edit $tag `
+            --repo $env:GITHUB_REPOSITORY `
+            --draft=false `
+            --latest
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish release $tag" }
