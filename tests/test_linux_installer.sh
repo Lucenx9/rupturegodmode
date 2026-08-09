@@ -37,6 +37,37 @@ awk '
     END { if (!found || !enabled) exit 1 }
 ' "$config_file"
 
+symlink_game_root="$temporary_directory/SymlinkGame"
+symlink_binary_directory="$symlink_game_root/StarRupture/Binaries/Win64"
+symlink_plugin_directory="$symlink_binary_directory/ModLoader/Plugins"
+symlink_config_file="$symlink_binary_directory/ModLoader/modloader.ini"
+managed_config="$temporary_directory/managed-modloader.ini"
+expected_managed_config="$temporary_directory/expected-managed-modloader.ini"
+
+mkdir -p "$symlink_plugin_directory"
+printf '' >"$symlink_binary_directory/StarRuptureGameSteam-Win64-Shipping.exe"
+printf '' >"$symlink_binary_directory/dwmapi.dll"
+printf 'old-plugin' >"$symlink_plugin_directory/RuptureGodMode.dll"
+printf 'old-sidecar' >"$symlink_plugin_directory/RuptureGodMode.json"
+printf '[AutoUpdate]\nEnabled=0\n' >"$managed_config"
+cp "$managed_config" "$expected_managed_config"
+ln -s "$managed_config" "$symlink_config_file"
+
+if RGM_DLL="$source_dll" \
+    "$project_root/scripts/install_local.sh" "$symlink_game_root"; then
+    printf 'Installer unexpectedly accepted a symlinked destination\n' >&2
+    exit 1
+fi
+
+test -L "$symlink_config_file"
+cmp "$expected_managed_config" "$managed_config"
+printf 'old-plugin' | cmp - "$symlink_plugin_directory/RuptureGodMode.dll"
+printf 'old-sidecar' | cmp - "$symlink_plugin_directory/RuptureGodMode.json"
+if compgen -G "$symlink_plugin_directory/.RuptureGodMode.install.*" >/dev/null; then
+    printf 'Installer left transaction files after rejecting a symlink\n' >&2
+    exit 1
+fi
+
 rollback_game_root="$temporary_directory/RollbackGame"
 rollback_binary_directory="$rollback_game_root/StarRupture/Binaries/Win64"
 rollback_plugin_directory="$rollback_binary_directory/ModLoader/Plugins"

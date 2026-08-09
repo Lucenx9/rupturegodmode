@@ -47,9 +47,11 @@ for existing_path in \
     "$legacy_dll" \
     "$legacy_sidecar" \
     "$config_file"; do
-    if path_exists "$existing_path" && [[ ! -f "$existing_path" ]]; then
-        echo "Expected a regular file but found another filesystem entry: $existing_path" >&2
-        exit 1
+    if path_exists "$existing_path"; then
+        if [[ -L "$existing_path" || ! -f "$existing_path" ]]; then
+            echo "Expected a regular non-symlink file but found another filesystem entry: $existing_path" >&2
+            exit 1
+        fi
     fi
 done
 
