@@ -6,6 +6,7 @@ enable_testing()
 
 add_library(god_mode_controller
     plugin/god_mode_controller.cpp
+    plugin/immortality_state.cpp
 )
 target_include_directories(god_mode_controller PUBLIC plugin)
 target_compile_features(god_mode_controller PUBLIC cxx_std_20)

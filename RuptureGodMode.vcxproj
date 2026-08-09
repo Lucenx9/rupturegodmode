@@ -79,12 +79,14 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="plugin\god_mode_controller.h" />
+    <ClInclude Include="plugin\immortality_state.h" />
     <ClInclude Include="plugin\plugin.h" />
     <ClInclude Include="plugin\star_rupture_effects.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="plugin\dllmain.cpp" />
     <ClCompile Include="plugin\god_mode_controller.cpp" />
+    <ClCompile Include="plugin\immortality_state.cpp" />
     <ClCompile Include="plugin\plugin.cpp" />
     <ClCompile Include="plugin\star_rupture_effects.cpp" />
     <ClCompile Include="$(GameSDKSourceDir)Basic.cpp">

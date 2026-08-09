@@ -60,6 +60,7 @@ sdk_sources=(
 project_sources=(
     "$project_root/plugin/dllmain.cpp"
     "$project_root/plugin/god_mode_controller.cpp"
+    "$project_root/plugin/immortality_state.cpp"
     "$project_root/plugin/plugin.cpp"
     "$project_root/plugin/star_rupture_effects.cpp"
 )

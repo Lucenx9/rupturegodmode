@@ -8,6 +8,7 @@
 #include "plugin.h"
 
 #include "god_mode_controller.h"
+#include "immortality_state.h"
 #include "star_rupture_effects.h"
 
 #include "Chimera_classes.hpp"
@@ -27,6 +28,7 @@ namespace
 {
 using RuptureGodMode::ApplyResult;
 using RuptureGodMode::GodModeController;
+using RuptureGodMode::ImmortalityState;
 using RuptureGodMode::NetworkMode;
 using RuptureGodMode::StarRuptureEffects;
 
@@ -57,6 +59,7 @@ struct TemperatureLatch
     float value;
 };
 std::unordered_map<SDK::ACrPlayerControllerBase *, TemperatureLatch> g_safeTemperatures;
+std::unordered_map<SDK::ACrPlayerControllerBase *, ImmortalityState> g_immortalityStates;
 
 PluginInfo g_pluginInfo = {
     "RuptureGodMode",
@@ -189,6 +192,25 @@ float RememberSafeTemperature(SDK::ACrPlayerControllerBase *controller,
     return found->second.value;
 }
 
+ImmortalityState *GetImmortalityState(SDK::ACrPlayerControllerBase *controller,
+                                      const bool createIfMissing)
+{
+    if (controller == nullptr)
+    {
+        return nullptr;
+    }
+    const auto found = g_immortalityStates.find(controller);
+    if (found != g_immortalityStates.end())
+    {
+        return &found->second;
+    }
+    if (!createIfMissing)
+    {
+        return nullptr;
+    }
+    return &g_immortalityStates.try_emplace(controller).first->second;
+}
+
 void TrackHostedController(SDK::ACrPlayerControllerBase *controller)
 {
     if (controller == nullptr || g_controller == nullptr)
@@ -234,7 +256,8 @@ void DisableCurrentPlayerEffects()
     if (g_controller != nullptr && controller != nullptr)
     {
         StarRuptureEffects effects(controller, FindPlayerForController(controller),
-                                   g_appliedLocalHadAuthority, NoSafeTemperature);
+                                   g_appliedLocalHadAuthority, NoSafeTemperature,
+                                   GetImmortalityState(controller, false));
         g_controller->RemoveAppliedEffects(effects);
     }
     if (g_controller != nullptr)
@@ -250,7 +273,8 @@ void DisableHostedPlayerEffects()
     for (auto &[controller, state] : g_hostedPlayers)
     {
         StarRuptureEffects effects(controller, FindPlayerForController(controller), true,
-                                   NoSafeTemperature);
+                                   NoSafeTemperature,
+                                   GetImmortalityState(controller, false));
         state->RemoveAppliedEffects(effects);
     }
 }
@@ -277,9 +301,11 @@ void OnPlayerLeft(void *rawController)
         return;
     }
     SDK::ACrCharacterPlayerBase *player = FindPlayerForController(controller);
-    StarRuptureEffects effects(controller, player, true, NoSafeTemperature);
+    StarRuptureEffects effects(controller, player, true, NoSafeTemperature,
+                               GetImmortalityState(controller, false));
     found->second->RemoveAppliedEffects(effects);
     g_safeTemperatures.erase(controller);
+    g_immortalityStates.erase(controller);
     g_hostedPlayers.erase(found);
 }
 
@@ -304,6 +330,7 @@ void OnWorldEndPlay(SDK::UWorld *world, const char *)
     DisableHostedPlayerEffects();
     g_hostedPlayers.clear();
     g_safeTemperatures.clear();
+    g_immortalityStates.clear();
     g_world = nullptr;
 }
 
@@ -335,7 +362,9 @@ void OnEngineTick(const float deltaSeconds)
         SDK::ACrCharacterPlayerBase *player = nullptr;
         const bool hasPlayer = FindLocalPlayer(controller, player);
         const float safeTemperature = RememberSafeTemperature(controller, player);
-        StarRuptureEffects effects(controller, player, HasAuthority(mode), safeTemperature);
+        StarRuptureEffects effects(
+            controller, player, HasAuthority(mode), safeTemperature,
+            GetImmortalityState(controller, HasAuthority(mode) && hasPlayer));
         const ApplyResult result = g_controller->Reconcile(
             mode, hasPlayer ? reinterpret_cast<std::uintptr_t>(player) : 0, effects);
         if (result == ApplyResult::Applied)
@@ -379,7 +408,9 @@ void OnEngineTick(const float deltaSeconds)
                 const float hostedSafeTemperature =
                     RememberSafeTemperature(hostedController, hostedPlayer);
                 StarRuptureEffects hostedEffects(hostedController, hostedPlayer, true,
-                                                 hostedSafeTemperature);
+                                                 hostedSafeTemperature,
+                                                 GetImmortalityState(hostedController,
+                                                                       hostedPlayer != nullptr));
                 state->Reconcile(NetworkMode::ListenServer,
                                  reinterpret_cast<std::uintptr_t>(hostedPlayer), hostedEffects);
             }
@@ -507,6 +538,7 @@ extern "C"
         g_controller.reset();
         g_hostedPlayers.clear();
         g_safeTemperatures.clear();
+        g_immortalityStates.clear();
         g_appliedLocalController = nullptr;
         g_appliedLocalHadAuthority = false;
         g_world = nullptr;

@@ -87,14 +87,32 @@ void ApplyNativeCheats(SDK::UCrCheatManager &cheats, const bool enabled)
     cheats.RestrictedTemperature(state);
     cheats.RestrictedToxicity(state);
 }
+
+class NativeImmortalityToggle final : public IImmortalityToggle
+{
+  public:
+    explicit NativeImmortalityToggle(SDK::UCrCheatManager &cheats) noexcept : m_cheats(cheats)
+    {
+    }
+
+    bool ToggleImmortality() override
+    {
+        m_cheats.Immortal();
+        return true;
+    }
+
+  private:
+    SDK::UCrCheatManager &m_cheats;
+};
 } // namespace
 
 StarRuptureEffects::StarRuptureEffects(SDK::ACrPlayerControllerBase *controller,
                                        SDK::ACrCharacterPlayerBase *player,
                                        const bool allowNativeCheats,
-                                       const float safeTemperature) noexcept
+                                       const float safeTemperature,
+                                       ImmortalityState *immortalityState) noexcept
     : m_controller(controller), m_player(player), m_allowNativeCheats(allowNativeCheats),
-      m_safeTemperature(safeTemperature)
+      m_safeTemperature(safeTemperature), m_immortalityState(immortalityState)
 {
 }
 
@@ -107,10 +125,27 @@ bool StarRuptureEffects::SetEnabled(const bool enabled)
     SDK::UCrCheatManager *cheats = GetCheatManager(m_controller, enabled);
     if (cheats == nullptr)
     {
-        return !enabled;
+        return !enabled &&
+               (m_immortalityState == nullptr || !m_immortalityState->IsEnabled());
     }
-    ApplyNativeCheats(*cheats, enabled);
-    return true;
+    if (m_immortalityState == nullptr)
+    {
+        return false;
+    }
+
+    NativeImmortalityToggle immortality(*cheats);
+    if (enabled)
+    {
+        if (!m_immortalityState->SetEnabled(true, immortality))
+        {
+            return false;
+        }
+        ApplyNativeCheats(*cheats, true);
+        return true;
+    }
+
+    ApplyNativeCheats(*cheats, false);
+    return m_immortalityState->SetEnabled(false, immortality);
 }
 
 void StarRuptureEffects::Maintain()
