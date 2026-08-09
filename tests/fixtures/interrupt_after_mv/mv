@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+should_interrupt=0
+case ${RGM_TEST_INTERRUPT_MODE:-} in
+    backup-dll)
+        if [[ ${1:-} == -- && \
+            ${2:-} == */Plugins/RuptureGodMode.dll && \
+            ${3:-} == */rollback/RuptureGodMode.dll ]]; then
+            should_interrupt=1
+        fi
+        ;;
+    install-dll)
+        if [[ ${1:-} == -- && \
+            ${2:-} == */.RuptureGodMode.install.*/RuptureGodMode.dll && \
+            ${2:-} != */rollback/* ]]; then
+            should_interrupt=1
+        fi
+        ;;
+esac
+
+"${RGM_TEST_REAL_MV:?}" "$@"
+if ((should_interrupt)); then
+    kill -TERM "$PPID"
+fi
