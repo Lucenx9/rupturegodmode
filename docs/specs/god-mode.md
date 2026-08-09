@@ -11,7 +11,9 @@ Provide a StarRupture ModLoader client plugin that keeps the local player's surv
 - Health, energy, shield, oxygen, hydration, calories, med-tool charge, and grenade charge are maintained at their maximum values.
 - Toxicity, radiation, heat, drain, corrosion, and infection are maintained at their minimum values.
 - Temperature is frozen at the safe value captured for the current pawn.
+- StarRupture's native immortality mode prevents lethal damage paths, including falls and solar storms.
 - The game's native unlimited/restricted cheats are enabled for health, survival vitals, ammunition, weapon heat, and hostile environmental values.
+- Native immortality is toggled exactly once per controller on enable and disable, so respawning cannot accidentally turn it off.
 - Disabling the mode removes all native cheats installed by this plugin and stops maintaining attributes.
 - A new pawn after respawn receives God Mode automatically.
 - In standalone mode, the local player receives full authoritative protection.

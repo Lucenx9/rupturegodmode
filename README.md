@@ -4,9 +4,9 @@ StarRupture ModLoader plugin that protects the local player's survival state. It
 
 ## Protected values
 
-While enabled, the plugin keeps health, energy, shield, oxygen, hydration, calories, med-tool charge, and grenade charge full. Toxicity, radiation, heat, drain, corrosion, and infection are held at their minimum, while temperature is frozen at the safe value captured for the pawn. Native StarRupture cheats also provide unlimited ammo and prevent weapon heat.
+While enabled, the plugin enables StarRupture's native immortality mode to stop lethal damage such as falls and solar storms. It also keeps health, energy, shield, oxygen, hydration, calories, med-tool charge, and grenade charge full. Toxicity, radiation, heat, drain, corrosion, and infection are held at their minimum, while temperature is frozen at the safe value captured for the pawn. Native StarRupture cheats also provide unlimited ammo and prevent weapon heat.
 
-Multiplayer is supported too. A listen-server host protects every connected player by default. A remote client maintains its local predicted attributes; for reliable server-authoritative health and survival protection, the host should also run the plugin.
+Multiplayer is supported too. A listen-server host protects every connected player by default, including with native immortality. A remote client maintains its local predicted attributes; the host must also run the plugin for reliable server-authoritative protection from lethal damage.
 
 ## Configuration
 

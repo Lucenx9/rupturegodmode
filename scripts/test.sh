@@ -10,5 +10,6 @@ cxx_compiler=${CXX_COMPILER:-clang++}
     -I"$project_root/plugin" \
     "$project_root/tests/test_god_mode_controller.cpp" \
     "$project_root/plugin/god_mode_controller.cpp" \
+    "$project_root/plugin/immortality_state.cpp" \
     -o "$test_binary"
 "$test_binary"

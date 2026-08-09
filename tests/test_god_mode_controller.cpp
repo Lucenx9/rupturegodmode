@@ -1,4 +1,5 @@
 #include "god_mode_controller.h"
+#include "immortality_state.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -9,6 +10,8 @@ namespace
 using RuptureGodMode::ApplyResult;
 using RuptureGodMode::GodModeController;
 using RuptureGodMode::IGodModeEffects;
+using RuptureGodMode::IImmortalityToggle;
+using RuptureGodMode::ImmortalityState;
 using RuptureGodMode::NetworkMode;
 
 class FakeEffects final : public IGodModeEffects
@@ -30,6 +33,34 @@ class FakeEffects final : public IGodModeEffects
     int maintainCalls = 0;
     bool lastEnabled = false;
     bool setEnabledSucceeds = true;
+};
+
+class FakeImmortalityToggle final : public IImmortalityToggle
+{
+  public:
+    bool ToggleImmortality() override
+    {
+        ++toggleCalls;
+        if (!toggleSucceeds)
+        {
+            return false;
+        }
+        immortal = !immortal;
+        return true;
+    }
+
+    void ApplyLethalDamage()
+    {
+        if (!immortal)
+        {
+            alive = false;
+        }
+    }
+
+    int toggleCalls = 0;
+    bool toggleSucceeds = true;
+    bool immortal = false;
+    bool alive = true;
 };
 
 void Require(const bool condition, const std::string_view message)
@@ -192,6 +223,38 @@ void WorldCleanupRemovesOnlyOwnedEffectsAndPreservesPreference()
     Require(untouched == ApplyResult::NoChange, "cleanup ignores effects it does not own");
     Require(disabledEffects.setEnabledCalls == 0, "cleanup never disables another owner's cheats");
 }
+
+void ImmortalityBlocksLethalDamageWithoutDoubleTogglingOnRespawn()
+{
+    ImmortalityState state;
+    FakeImmortalityToggle native;
+
+    Require(state.SetEnabled(true, native), "native immortality can be enabled");
+    native.ApplyLethalDamage();
+    Require(native.alive, "native immortality blocks a lethal damage event");
+
+    Require(state.SetEnabled(true, native), "respawn can reapply God Mode safely");
+    Require(native.toggleCalls == 1, "respawn does not toggle native immortality off");
+    Require(native.immortal, "native immortality remains active after respawn");
+
+    Require(state.SetEnabled(false, native), "native immortality can be disabled");
+    Require(native.toggleCalls == 2, "disable owns exactly one matching native toggle");
+    native.ApplyLethalDamage();
+    Require(!native.alive, "lethal damage is effective again after disabling God Mode");
+}
+
+void FailedImmortalityToggleIsRetried()
+{
+    ImmortalityState state;
+    FakeImmortalityToggle native;
+    native.toggleSucceeds = false;
+
+    Require(!state.SetEnabled(true, native), "a failed native toggle reports failure");
+    native.toggleSucceeds = true;
+    Require(state.SetEnabled(true, native), "a failed native toggle is retried");
+    Require(native.toggleCalls == 2, "failure is not cached as active immortality");
+    Require(native.immortal, "the successful retry enables native immortality");
+}
 } // namespace
 
 int main()
@@ -206,6 +269,8 @@ int main()
     ListenServerHostIsSupported();
     FailedRemovalIsRetried();
     WorldCleanupRemovesOnlyOwnedEffectsAndPreservesPreference();
+    ImmortalityBlocksLethalDamageWithoutDoubleTogglingOnRespawn();
+    FailedImmortalityToggleIsRetried();
     std::cout << "god_mode_controller_tests: PASS\n";
     return 0;
 }
