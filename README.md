@@ -55,9 +55,15 @@ The cross-build writes `build/RuptureGodMode.dll`. Run `scripts/test.sh` for the
 
 1. Install [StarRupture ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader).
 2. Launch the game once and close it. This lets ModLoader create its directories.
-3. Download `RuptureGodMode.dll` from the latest GitHub release.
+3. Download the package for your platform from the latest GitHub release.
 
-Do not install the DLL while the game is running. The plugin is loaded only when StarRupture starts.
+Do not install the plugin while the game is running. The plugin is loaded only when StarRupture starts.
+
+### Automatic updates
+
+Release packages install `RuptureGodMode.json` next to the DLL. On every game startup, ModLoader uses this sidecar to check the latest compatible GitHub release and atomically replace the DLL before loading it. Automatic updates require `[AutoUpdate] Enabled=1` in `ModLoader/modloader.ini`; the Windows installer enables it automatically.
+
+Users upgrading from v0.1.1 or an older DLL-only installation must install a packaged release once. Future releases are then handled by ModLoader.
 
 ### Linux / Steam Deck
 
@@ -75,17 +81,17 @@ StarRupture runs through Proton, but the plugin is still the same Windows DLL.
    /mnt/storage/SteamLibrary/steamapps/common/StarRupture
    ```
 
-2. Copy the downloaded DLL into:
+2. Download `RuptureGodMode-Client-vX.Y.Z.zip` and extract its `Plugins` directory into:
 
    ```text
-   StarRupture/StarRupture/Binaries/Win64/ModLoader/Plugins/RuptureGodMode.dll
+   StarRupture/StarRupture/Binaries/Win64/ModLoader
    ```
 
    From a terminal:
 
    ```bash
-   cp ~/Downloads/RuptureGodMode.dll \
-     "/path/to/StarRupture/StarRupture/Binaries/Win64/ModLoader/Plugins/"
+   unzip ~/Downloads/RuptureGodMode-Client-vX.Y.Z.zip \
+     -d "/path/to/StarRupture/StarRupture/Binaries/Win64/ModLoader"
    ```
 
 3. Make sure the ModLoader launch option required by your Proton setup is configured in Steam. The usual option is:
@@ -94,7 +100,7 @@ StarRupture runs through Proton, but the plugin is still the same Windows DLL.
    WINEDLLOVERRIDES="dwmapi=n,b" %command%
    ```
 
-For a locally compiled DLL, the repository includes a validated installer:
+For a locally compiled DLL, the repository includes a validated installer that also installs the auto-update sidecar:
 
 ```bash
 scripts/install_local.sh "/path/to/StarRupture"
@@ -104,22 +110,24 @@ Override the DLL location with `RGM_DLL=/path/to/RuptureGodMode.dll` if needed.
 
 ### Windows
 
-1. In Steam, right-click **StarRupture**, then select **Manage > Browse local files**.
-2. Open `StarRupture\Binaries\Win64\ModLoader\Plugins` inside that directory.
-3. Copy the downloaded file there as `RuptureGodMode.dll`.
-4. If Windows blocked the downloaded DLL, open PowerShell and run:
+1. Download `RuptureGodMode-Windows-vX.Y.Z.zip` from the latest release.
+2. Extract the complete ZIP.
+3. Right-click `Install-RuptureGodMode.ps1` and select **Run with PowerShell**. If script execution is blocked, open PowerShell in the extracted directory and run:
 
    ```powershell
-   Unblock-File "C:\path\to\StarRupture\StarRupture\Binaries\Win64\ModLoader\Plugins\RuptureGodMode.dll"
+   powershell -ExecutionPolicy Bypass -File .\Install-RuptureGodMode.ps1
    ```
 
-For a locally compiled DLL, use the included PowerShell installer:
+The installer reads Steam's `libraryfolders.vdf` and searches all filesystem drives, so libraries on another SSD are detected automatically. It refuses to modify files while StarRupture is running, replaces the previous God Mode DLL, removes legacy duplicate filenames, installs the sidecar, and enables ModLoader auto-update.
+
+If automatic detection fails, provide the folder shown by **Steam > Manage > Browse local files**:
 
 ```powershell
-.\scripts\install_local.ps1 -GameRoot "C:\Program Files (x86)\Steam\steamapps\common\StarRupture"
+powershell -ExecutionPolicy Bypass -File .\Install-RuptureGodMode.ps1 `
+  -GameRoot "D:\SteamLibrary\steamapps\common\StarRupture"
 ```
 
-Use `-DllPath "C:\path\to\RuptureGodMode.dll"` to install a DLL from another location.
+For a locally compiled DLL, run `.\scripts\install_local.ps1`; it uses the same automatic game detection. Use `-DllPath "C:\path\to\RuptureGodMode.dll"` to install a DLL from another location.
 
 ### Verify the installation
 
@@ -128,6 +136,6 @@ Use `-DllPath "C:\path\to\RuptureGodMode.dll"` to install a DLL from another loc
 3. Load a save and press `F8` to toggle God Mode.
 4. After the first launch, settings are available in `ModLoader\Plugins\config\RuptureGodMode.ini`.
 
-To uninstall the plugin, close the game and delete `ModLoader\Plugins\RuptureGodMode.dll`. The generated INI file can be kept or removed.
+To uninstall the plugin, close the game and delete both `ModLoader\Plugins\RuptureGodMode.dll` and `ModLoader\Plugins\RuptureGodMode.json`. Removing the sidecar prevents ModLoader from downloading the DLL again. The generated INI file can be kept or removed.
 
 Compatibility: ModLoader plugin interface 60 and StarRupture Game SDK build CL121391.

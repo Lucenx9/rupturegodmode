@@ -12,6 +12,14 @@ jobs:
       - name: Run controller tests
         run: scripts/test.sh
 
+  windows-installer-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise Windows auto-detection and replacement
+        shell: pwsh
+        run: tests/Test-WindowsInstaller.ps1
+
   plugin-build:
     runs-on: windows-latest
     steps:

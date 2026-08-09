@@ -20,6 +20,10 @@ Provide a StarRupture ModLoader client plugin that keeps the local player's surv
 - On a listen server, the host applies authoritative protection to every connected player by default.
 - On a remote multiplayer client, the plugin maintains the local predicted attributes. Installing the plugin on the host provides authoritative protection as well.
 - Plugin shutdown and world teardown remove native effects when a local player still exists.
+- Every tagged release publishes a versioned DLL, a ModLoader update manifest, a DLL-plus-sidecar package, and a Windows installer package.
+- Once the sidecar is installed, ModLoader downloads compatible future releases automatically at game startup.
+- The Windows installer discovers Steam libraries from `libraryfolders.vdf`, including libraries on other SSDs, with a fallback scan of filesystem drives.
+- The Windows installer replaces the previous DLL, removes known legacy duplicate filenames, installs the sidecar, and enables ModLoader auto-update while leaving unrelated plugins untouched.
 
 ## Configuration
 
